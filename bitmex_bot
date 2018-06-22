@@ -1,0 +1,29 @@
+from time import sleep
+import ccxt
+ 
+exchanges = {
+    "bitmex": {
+        "apiKey": "BITMEXのIDをいれてください",
+        "secret": "BITMEXのSecretをいれてください"
+    },
+}
+ 
+exchange = ccxt.bitmex()
+exchange.apiKey = exchanges["bitmex"]["apiKey"]
+exchange.secret = exchanges["bitmex"]["secret"]
+ 
+orderbook = exchange.fetch_order_book ('BTC/USD')
+bid = orderbook['bids'][0][0] if len (orderbook['bids']) > 0 else None
+ask = orderbook['asks'][0][0] if len (orderbook['asks']) > 0 else None
+spread = (ask - bid) if (bid and ask) else None
+print (exchange.id, 'market price', { 'bid': bid, 'ask': ask, 'spread': spread })
+ 
+ 
+#成り行き買い
+exchange.create_market_buy_order(symbol='BTC/USD', amount=100)
+ 
+#1分待機
+sleep(60)
+ 
+#成り行き売り
+exchange.create_market_sell_order(symbol='BTC/USD', amount=100)
