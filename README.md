@@ -1,0 +1,2 @@
+# scalpingbot
+スキャルピングbot
