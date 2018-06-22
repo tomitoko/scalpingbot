@@ -1,0 +1,130 @@
+#BITMEX用RCI戦略スキャルピングBOT
+#https://note.mu/jassie/n/ncb8153f79ca0
+
+#!/usr/bin/python3
+# coding: utf-8
+import json
+import ccxt
+import requests
+import time
+import numpy as np
+import datetime
+from datetime import datetime, timezone, timedelta
+from pytz import timezone, utc
+
+#----------------------------------------------------------
+
+API = ''#BITMEXのAPIキー
+SECRET = ''#BITMEXのSECRETキー
+ENTRY = 100#ロット設定
+
+#----------------------------------------------------------
+
+bitmex = ccxt.bitmex({
+   'apiKey': API,   
+   'secret': SECRET,
+})
+
+def customTime(*args):
+   utc_dt = utc.localize(datetime.utcnow())
+   my_tz = timezone("Japan")
+   converted = utc_dt.astimezone(my_tz)
+   return converted.timetuple()
+   
+def market(side, size):
+   o = bitmex.create_order('BTC/USD', type='market', side=side, amount=size)
+
+def position():
+    pos = bitmex.private_get_position({
+        'filter': json.dumps({
+            "isOpen": True,
+            "symbol": "XBTUSD"
+        })
+    })
+    if len(pos) == 0:
+        print("NO POSITION")
+        side = 'NO POSITION'
+        return {'side': side, 'size': 0, 'avgEntryPrice': 0}
+    elif pos[0]['currentQty'] > 0:
+        side = 'LONG'
+    else:
+        side = 'SHORT'
+    return {'side': side, 'size': round(pos[0]['currentQty']), 'avgEntryPrice': pos[0]['avgEntryPrice']}
+    
+def ord(seq, idx, itv):
+    p = seq[idx]
+    o = 1
+    for i in range(0,itv):
+        if p < seq[i]:
+            o = o + 1
+
+    return o
+def d(itv,src):
+    sum = 0.0
+    for i in range(0,itv):
+        sum = sum + pow((i + 1) - ord(src, i, itv),2)
+    return sum
+
+def rci(src):
+
+    itv = 9
+    rciS = (1.0 - 6.0 * d(itv,src[1:10]) / (itv * (itv * itv - 1.0))) * 100.0
+    rciS5MB = (1.0 - 6.0 * d(itv,src[2:11]) / (itv * (itv * itv - 1.0))) * 100.0
+    print('RCI短期',rciS)
+
+    itv = 13
+    rciM = (1.0 - 6.0 * d(itv,src[1:14]) / (itv * (itv * itv - 1.0))) * 100.0
+    rciM5MB = (1.0 - 6.0 * d(itv,src[2:15]) / (itv * (itv * itv - 1.0))) * 100.0
+    print('RCI中期',rciM)
+
+    itv = 15
+    rciL = (1.0 - 6.0 * d(itv,src[1:16]) / (itv * (itv * itv - 1.0))) * 100.0
+    rciL5MB = (1.0 - 6.0 * d(itv,src[2:17]) / (itv * (itv * itv - 1.0))) * 100.0
+    print('RCI長期',rciL)
+    print()
+    
+    signal = None
+    exitsignal = None
+    
+    if (rciS < -80 and rciS > rciS5MB) or (rciM < -82 and rciM > rciM5MB) and (rciL < -10 and rciL > rciL5MB):
+        signal = 'buy'
+    elif (rciS > 80 and rciS < rciS5MB) or (rciM > 82 and rciM < rciM5MB) and (rciL > 10 and rciL < rciL5MB):
+        signal = 'sell'
+    
+    if rciM > 80 and rciM < rciM5MB:
+        exitsignal = 'sell'
+    elif rciM < -80 and rciM > rciM5MB:
+        exitsignal = 'buy'
+        
+    return signal,exitsignal
+
+while True:
+    
+    now = str(int(datetime.now().timestamp()))
+    res = requests.get('https://www.bitmex.com/api/udf/history?symbol=XBTUSD&resolution=5&from=' + str(int(now)-300*100) + '&to=' + now)
+    ohlcv = res.json()
+    close = np.array(ohlcv['c'])
+    closeR = close[::-1]
+    signal,exitsignal = rci(closeR)
+    
+    last = bitmex.fetch_ticker('BTC/USD')['last']
+    print('現在価格：'+str(last))
+    pos = position()
+    print('現在のポジション:' + pos['side'] + ' ' + str(pos['size']) + ' @ ' + str(pos['avgEntryPrice']))
+    print ('-----------------------------------------------')
+    print()
+    
+    if pos['side'] == 'NO POSITION':
+        if signal == 'buy':
+            market('buy', ENTRY)
+            time.sleep(5)
+        elif signal == 'sell':
+            market('sell', ENTRY)
+            time.sleep(5)
+    if pos['side'] == 'LONG' and exitsignal == 'sell':
+        market('sell', ENTRY)
+        time.sleep(5)
+    elif pos['side'] == 'SHORT' and exitsignal == 'buy':
+        market('buy', ENTRY)
+        time.sleep(5)
+    time.sleep(30)
